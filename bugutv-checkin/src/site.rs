@@ -2,7 +2,10 @@ use crate::config::AppConfig;
 
 use anyhow::{Error, Result};
 use regex::Regex;
-use reqwest::{Client, StatusCode};
+use reqwest::{
+    Client, StatusCode,
+    header::{HeaderMap, ORIGIN, REFERER},
+};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use tracing::{info, warn};
@@ -28,6 +31,10 @@ impl BrowserSite {
     }
 
     pub async fn login(&self) -> Result<bool> {
+        let resp = self.client.get(self.cfg.base_url.clone()).send().await?;
+        let header = resp.headers();
+        info!("header: {:?}", header);
+
         let url = self.cfg.base_url.clone() + "/wp-login.php";
 
         let mut form = HashMap::new();
@@ -38,10 +45,38 @@ impl BrowserSite {
         form.insert("redirect_to", self.cfg.base_url.clone());
         form.insert("testcookie", "1".into());
 
-        let resp = self.client.post(url).form(&form).send().await?;
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            REFERER,
+            "https://www.bugutv.vip/wp-login.php".parse().unwrap(),
+        );
+        headers.insert(ORIGIN, self.cfg.base_url.clone().parse().unwrap());
+
+        let resp = self
+            .client
+            .post(url)
+            .headers(headers)
+            .form(&form)
+            .send()
+            .await?;
         match resp.status() {
+            StatusCode::OK => {
+                let re = Regex::new(r"(积分钱包).*(当前余额)")?;
+                let resp_text = resp.text().await?;
+                if let Some(cap) = re.captures(&resp_text) {
+                    if cap.len() > 0 {
+                        return Ok(true);
+                    }
+                }
+                return Ok(false);
+            }
             StatusCode::FOUND => Ok(true),
-            _ => Ok(false),
+            other => {
+                warn!("login failed: {:?}", other);
+                warn!("headers: {:?}", resp.headers());
+
+                Ok(false)
+            }
         }
     }
 
@@ -76,7 +111,7 @@ impl BrowserSite {
             }
         }
 
-        warn!("签到失败");
+        warn!("签到失败: {}", response_text);
         Err(Error::msg("签到失败"))
     }
 }
@@ -112,7 +147,7 @@ mod tests {
             username: "user1".into(),
             password: "passwd1".into(),
         };
-        let client = client::from_url_with_default(server.base_url()).unwrap();
+        let client = client::from_url_with_default().unwrap();
         let site = BrowserSite::new(cfg, client);
         let resp = site.login().await;
         assert!(resp.is_ok());
@@ -129,7 +164,7 @@ mod tests {
             username: "user1".into(),
             password: "passwd1".into(),
         };
-        let client = client::from_url_with_default(server.base_url()).unwrap();
+        let client = client::from_url_with_default().unwrap();
         let site = BrowserSite::new(cfg, client);
         let resp = site.login().await;
         assert!(resp.is_ok());
@@ -147,7 +182,7 @@ mod tests {
                 username: "user1".into(),
                 password: "passwd1".into(),
             };
-            let client = client::from_url_with_default(server.base_url()).unwrap();
+            let client = client::from_url_with_default().unwrap();
             let site = BrowserSite::new(cfg, client);
             let resp = site.login().await;
             assert!(resp.is_ok());

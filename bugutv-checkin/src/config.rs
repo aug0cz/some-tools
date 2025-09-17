@@ -1,5 +1,5 @@
 use anyhow::Result;
-use dotenvy::dotenv;
+use dotenvy;
 use serde::Deserialize;
 use std::env;
 
@@ -14,7 +14,9 @@ pub struct AppConfig {
 
 impl AppConfig {
     pub fn from_env() -> Result<Self> {
-        dotenv().ok();
+        if dotenvy::from_filename(".env.development").is_err() {
+            dotenvy::dotenv().ok();
+        }
 
         Ok(Self {
             username: env::var("USERNAME")?,
