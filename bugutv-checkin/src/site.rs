@@ -2,7 +2,7 @@ use crate::config::AppConfig;
 
 use anyhow::{Error, Result};
 use regex::Regex;
-use reqwest::Client;
+use reqwest::{Client, StatusCode};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use tracing::{info, warn};
@@ -27,7 +27,7 @@ impl BrowserSite {
         Ok(())
     }
 
-    pub async fn login(&self) -> Result<()> {
+    pub async fn login(&self) -> Result<bool> {
         let url = self.cfg.base_url.clone() + "/wp-login.php";
 
         let mut form = HashMap::new();
@@ -37,8 +37,12 @@ impl BrowserSite {
         form.insert("wp-submit", "登录".into());
         form.insert("redirect_to", self.cfg.base_url.clone());
         form.insert("testcookie", "1".into());
-        let _ = self.client.post(url).form(&form).send().await?;
-        Ok(())
+
+        let resp = self.client.post(url).form(&form).send().await?;
+        match resp.status() {
+            StatusCode::FOUND => Ok(true),
+            _ => Ok(false),
+        }
     }
 
     pub async fn check_in(&self) -> Result<(), Error> {
@@ -74,5 +78,80 @@ impl BrowserSite {
 
         warn!("签到失败");
         Err(Error::msg("签到失败"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::client;
+
+    use super::*;
+    use httpmock::prelude::*;
+
+    fn mockserver_by_status(status: u16) -> MockServer {
+        let server = MockServer::start();
+        let _mock = server.mock(|when, then| {
+            when.method(POST).path("/wp-login.php");
+            then.status(status)
+                .header(
+                    "set-cookie",
+                    "wordpress_test_cookie=WP-Cookie-Check; path=/; secure",
+                )
+                .body("<html></html>");
+        });
+        server
+    }
+
+    #[tokio::test]
+    async fn test_site_login_status200() {
+        let server = mockserver_by_status(200);
+
+        // let url = format!("{}/wp-login.php", server.base_url());
+        let cfg = AppConfig {
+            base_url: server.base_url(),
+            username: "user1".into(),
+            password: "passwd1".into(),
+        };
+        let client = client::from_url_with_default(server.base_url()).unwrap();
+        let site = BrowserSite::new(cfg, client);
+        let resp = site.login().await;
+        assert!(resp.is_ok());
+        assert_eq!(resp.unwrap(), false);
+    }
+
+    #[tokio::test]
+    async fn test_site_login_status302() {
+        let server = mockserver_by_status(302);
+
+        // let url = format!("{}/wp-login.php", server.base_url());
+        let cfg = AppConfig {
+            base_url: server.base_url(),
+            username: "user1".into(),
+            password: "passwd1".into(),
+        };
+        let client = client::from_url_with_default(server.base_url()).unwrap();
+        let site = BrowserSite::new(cfg, client);
+        let resp = site.login().await;
+        assert!(resp.is_ok());
+        assert_eq!(resp.unwrap(), true);
+    }
+
+    #[tokio::test]
+    async fn test_site_login_some_status() {
+        let statuses: [u16; 9] = [200, 201, 401, 403, 500, 501, 502, 503, 504];
+
+        for status in statuses {
+            let server = mockserver_by_status(status);
+            let cfg = AppConfig {
+                base_url: server.base_url(),
+                username: "user1".into(),
+                password: "passwd1".into(),
+            };
+            let client = client::from_url_with_default(server.base_url()).unwrap();
+            let site = BrowserSite::new(cfg, client);
+            let resp = site.login().await;
+            assert!(resp.is_ok());
+            assert_eq!(resp.unwrap(), false);
+        }
     }
 }
