@@ -61,10 +61,11 @@ impl BrowserSite {
             .await?;
         match resp.status() {
             StatusCode::OK => {
-                let re = Regex::new(r"(积分钱包).*(当前余额)")?;
+                let re = Regex::new(r"(?ms)(积分钱包).*(当前余额：)(\d+?)")?;
                 let resp_text = resp.text().await?;
                 if let Some(cap) = re.captures(&resp_text) {
-                    if cap.len() > 0 {
+                    if cap.len() == 4 {
+                        info!("当前积分余额: {:?}", &cap[3]);
                         return Ok(true);
                     }
                 }
@@ -188,5 +189,33 @@ mod tests {
             assert!(resp.is_ok());
             assert_eq!(resp.unwrap(), false);
         }
+    }
+
+    #[tokio::test]
+    async fn test_site_login_with_content() {
+        let server = MockServer::start();
+        let _mock = server.mock(|when, then| {
+            when.method(POST).path("/wp-login.php");
+            then.status(200).body(
+                r#"
+            <div class="menu-card-box-1">
+            <span class="small"><i class="fas fa-coins mr-1"></i>积分钱包</span>
+            <p class="small m-0">当前余额：1</p><p class="small">累计消费：3</p>
+            <a class="btn btn-sm btn-block btn-rounded btn-light" href="https://ww
+w.bugutv.vip/user/vip" rel="nofollow noopener noreferrer">我的会员</a></div>
+            "#,
+            );
+        });
+
+        let cfg = AppConfig {
+            base_url: server.base_url(),
+            username: "user1".into(),
+            password: "passwd1".into(),
+        };
+        let client = client::from_url_with_default().unwrap();
+        let site = BrowserSite::new(cfg, client);
+        let resp = site.login().await;
+        assert!(resp.is_ok());
+        assert_eq!(resp.unwrap(), true);
     }
 }
