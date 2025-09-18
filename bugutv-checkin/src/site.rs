@@ -1,6 +1,6 @@
 use crate::config::AppConfig;
 
-use anyhow::{Error, Result};
+use anyhow::{Error, Ok, Result};
 use regex::Regex;
 use reqwest::{
     Client, StatusCode,
@@ -25,8 +25,12 @@ impl BrowserSite {
     }
 
     pub async fn login_and_check_in(&self) -> Result<()> {
-        self.login().await?;
-        self.check_in().await?;
+        let success = self.login().await?;
+        if !success {
+            return Err(Error::msg("登陆失败"));
+        }
+        let nonce = self.get_nonce().await?;
+        self.check_in(nonce).await?;
         Ok(())
     }
 
@@ -46,10 +50,7 @@ impl BrowserSite {
         form.insert("testcookie", "1".into());
 
         let mut headers = HeaderMap::new();
-        headers.insert(
-            REFERER,
-            "https://www.bugutv.vip/wp-login.php".parse().unwrap(),
-        );
+        headers.insert(REFERER, url.parse().unwrap());
         headers.insert(ORIGIN, self.cfg.base_url.clone().parse().unwrap());
 
         let resp = self
@@ -81,24 +82,27 @@ impl BrowserSite {
         }
     }
 
-    pub async fn check_in(&self) -> Result<(), Error> {
-        let url_checkin = self.cfg.base_url.clone() + "/wp-admin/admin-ajax.php";
+    pub async fn get_nonce(&self) -> Result<String> {
         let url_user = self.cfg.base_url.clone() + "/user";
         let nonce_re = Regex::new(r#"data-nonce="(.*?)""#).unwrap();
 
         let user_text = self.client.get(url_user).send().await?.text().await?;
-
-        let Some(nonce) = nonce_re.captures(&user_text) else {
+        println!("text: {}", user_text);
+        let Some(cap) = nonce_re.captures(&user_text) else {
             info!("没有找到nonce");
             return Err(Error::msg("not found nonce"));
         };
+        let nonce = &cap[1];
+        println!("cap: {:?}", cap);
+        Ok(nonce.to_string())
+    }
 
-        info!("find nonce: {:?}", &nonce[1]);
-
+    pub async fn check_in(&self, nonce: String) -> Result<(), Error> {
+        let url_checkin = self.cfg.base_url.clone() + "/wp-admin/admin-ajax.php";
         let response = self
             .client
             .post(url_checkin)
-            .form(&json!({"action": "user_qiandao", "nonce": &nonce[1]}))
+            .form(&json!({"action": "user_qiandao", "nonce": nonce}))
             .send()
             .await?;
 
@@ -135,6 +139,16 @@ mod tests {
                 )
                 .body("<html></html>");
         });
+        server
+    }
+
+    fn setup_mockserver(path: &str, status: u16, body: impl AsRef<[u8]>) -> MockServer {
+        let server = MockServer::start();
+        let _mock = server.mock(|when, then| {
+            when.method(POST).path(path);
+            then.status(status).body(body);
+        });
+
         server
     }
 
@@ -201,8 +215,7 @@ mod tests {
             <div class="menu-card-box-1">
             <span class="small"><i class="fas fa-coins mr-1"></i>积分钱包</span>
             <p class="small m-0">当前余额：1</p><p class="small">累计消费：3</p>
-            <a class="btn btn-sm btn-block btn-rounded btn-light" href="https://ww
-w.bugutv.vip/user/vip" rel="nofollow noopener noreferrer">我的会员</a></div>
+            <a class="btn btn-sm btn-block btn-rounded btn-light" href="https://www.bugutv.vip/user/vip" rel="nofollow noopener noreferrer">我的会员</a></div>
             "#,
             );
         });
@@ -217,5 +230,91 @@ w.bugutv.vip/user/vip" rel="nofollow noopener noreferrer">我的会员</a></div>
         let resp = site.login().await;
         assert!(resp.is_ok());
         assert_eq!(resp.unwrap(), true);
+    }
+
+    #[tokio::test]
+    async fn test_site_check_in() {
+        struct Validate {
+            result: bool,
+            body: String,
+        }
+        let mock_bodys = vec![
+            Validate {
+                result: false,
+                body: json!({"status": 0, "msg": "签到失败"}).to_string(),
+            },
+            Validate {
+                result: false,
+                body: json!({"status": 1, "msg": "签到成功"}).to_string(),
+            },
+            Validate {
+                result: false,
+                body: json!("<html></html>").to_string(),
+            },
+        ];
+
+        for mock_body in mock_bodys {
+            let server = setup_mockserver("/wp-admin/admin-ajax.php", 200, mock_body.body);
+            let cfg = AppConfig {
+                base_url: server.base_url(),
+                username: "user1".into(),
+                password: "passwd1".into(),
+            };
+            let client = client::from_url_with_default().unwrap();
+            let site = BrowserSite::new(cfg, client);
+            let resp = site.check_in("xxxx".into()).await;
+            if mock_body.result {
+                assert!(resp.is_ok());
+            } else {
+                assert!(resp.is_err())
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_site_nonce() {
+        struct MockData {
+            result: Option<String>,
+            body: String,
+            status: u16,
+        }
+
+        let mock_datas = vec![
+            MockData {
+                result: Some("28b21150cd".into()),
+                body: r#"sdjis data-nonce="28b21150cd" data-toggle="tooltip">"#.into(),
+                status: 200,
+            },
+            MockData {
+                result: None,
+                body: "<html></html>".into(),
+                status: 200,
+            },
+            MockData {
+                result: None,
+                body: "".into(),
+                status: 503,
+            },
+        ];
+
+        for mock in mock_datas {
+            let server = MockServer::start();
+
+            server.mock(|when, then| {
+                when.method(GET).path("/user");
+                then.status(mock.status).body(mock.body);
+            });
+
+            let cfg = AppConfig {
+                base_url: server.base_url(),
+                username: "user1".into(),
+                password: "passwd1".into(),
+            };
+            let client = client::from_url_with_default().unwrap();
+            let site = BrowserSite::new(cfg, client);
+            let nonce = site.get_nonce().await.ok();
+
+            assert_eq!(nonce, mock.result)
+        }
     }
 }

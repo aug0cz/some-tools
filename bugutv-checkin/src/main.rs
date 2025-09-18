@@ -15,8 +15,8 @@ async fn main() -> Result<()> {
     let bugutv_site = BrowserSite::new(config, client);
     let status = bugutv_site.login().await?;
     info!("登陆状态: {}", status);
-
-    let _ = bugutv_site.check_in().await?;
+    let nonce = bugutv_site.get_nonce().await?;
+    let _ = bugutv_site.check_in(nonce).await?;
 
     Ok(())
 }
