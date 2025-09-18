@@ -30,14 +30,13 @@ impl BrowserSite {
             return Err(Error::msg("登陆失败"));
         }
         let nonce = self.get_nonce().await?;
+        info!("获取nonce: {}", nonce);
         self.check_in(nonce).await?;
         Ok(())
     }
 
     pub async fn login(&self) -> Result<bool> {
-        let resp = self.client.get(self.cfg.base_url.clone()).send().await?;
-        let header = resp.headers();
-        info!("header: {:?}", header);
+        let _ = self.client.get(self.cfg.base_url.clone()).send().await?;
 
         let url = self.cfg.base_url.clone() + "/wp-login.php";
 
@@ -87,13 +86,11 @@ impl BrowserSite {
         let nonce_re = Regex::new(r#"data-nonce="(.*?)""#).unwrap();
 
         let user_text = self.client.get(url_user).send().await?.text().await?;
-        println!("text: {}", user_text);
         let Some(cap) = nonce_re.captures(&user_text) else {
             info!("没有找到nonce");
             return Err(Error::msg("not found nonce"));
         };
         let nonce = &cap[1];
-        println!("cap: {:?}", cap);
         Ok(nonce.to_string())
     }
 
@@ -116,7 +113,6 @@ impl BrowserSite {
             }
         }
 
-        warn!("签到失败: {}", response_text);
         Err(Error::msg("签到失败"))
     }
 }
