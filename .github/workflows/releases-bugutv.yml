@@ -1,0 +1,55 @@
+name: Bugutv Release
+
+on:
+  push:
+    branches:
+      - release-bugutv-*
+
+jobs:
+  build_and_release:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        build: [linux, macos]
+        include:
+          - build: linux
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            archive-name: bugutv-checkin-linux-x86_64.tar.gz
+          - build: macos
+            os: macos-latest
+            target: x86_64-apple-darwin
+            archive-name: bugutv-checkin-macos-x86_64.tar.gz
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: setup rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+          target: ${{ matrix.target}}
+
+      - name: build bugutv-checkin
+        working-directory: ./bugutv-checkin
+        run: cargo build --release --target ${{ matrix.target }}
+        env:
+          RUST_BACKTRACE: 1
+
+      - name: Strip binary
+        if: matrix.build == 'linux' || matrix.build == 'macos'
+        working-directory: ./bugutv-checkin
+        run: |
+          strip target/${{ matrix.target }}/release/bugutv-checkin
+
+      - name: Create archive
+        working-directory: ./bugutv-checkin
+        run: tar -czvf ${{ matrix.archive-name }} -C target/${{ matrix.target }}/release/bugutv-checkin
+
+      - name: Upload Release Asset
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ matrix.archive-name }}
+          path: ./bugutv-checkin/${{ matrix.archive-name }}
