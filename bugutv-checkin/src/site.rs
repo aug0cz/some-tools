@@ -36,6 +36,7 @@ impl BrowserSite {
     }
 
     pub async fn login(&self) -> Result<bool> {
+        info!("开始登录: {}", self.cfg.username.clone());
         let _ = self.client.get(self.cfg.base_url.clone()).send().await?;
 
         let url = self.cfg.base_url.clone() + "/wp-login.php";
@@ -73,9 +74,7 @@ impl BrowserSite {
             }
             StatusCode::FOUND => Ok(true),
             other => {
-                warn!("login failed: {:?}", other);
-                warn!("headers: {:?}", resp.headers());
-
+                warn!("登陆失败: {:?}", other);
                 Ok(false)
             }
         }
@@ -130,7 +129,7 @@ impl BrowserSite {
                 return Ok(());
             }
         }
-
+        warn!("签到失败: {}", response_text);
         Err(Error::msg("签到失败"))
     }
 }

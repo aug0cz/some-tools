@@ -9,7 +9,7 @@ mod site;
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt().init();
-
+    info!("开始执行 bugutv 签到脚本");
     let config = AppConfig::from_env()?;
     let client = client::from_url_with_default()?;
     let bugutv_site = BrowserSite::new(config, client);
