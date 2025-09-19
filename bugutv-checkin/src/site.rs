@@ -81,6 +81,24 @@ impl BrowserSite {
         }
     }
 
+    pub async fn get_balance(&self) -> Result<u32> {
+        let resp = self
+            .client
+            .get(self.cfg.base_url.clone())
+            .send()
+            .await?
+            .text()
+            .await?;
+        let re = Regex::new(r"(?ms)(积分钱包).*(当前余额：)(\d+?)")?;
+        if let Some(cap) = re.captures(&resp) {
+            if cap.len() == 4 {
+                let balance: u32 = cap[3].parse()?;
+                return Ok(balance);
+            }
+        }
+        Err(Error::msg("not found balance"))
+    }
+
     pub async fn get_nonce(&self) -> Result<String> {
         let url_user = self.cfg.base_url.clone() + "/user";
         let nonce_re = Regex::new(r#"data-nonce="(.*?)""#).unwrap();
