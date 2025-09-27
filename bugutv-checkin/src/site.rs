@@ -121,7 +121,15 @@ impl BrowserSite {
             .await?;
 
         let response_text = response.text().await?;
-        let v = serde_json::from_str::<Value>(&response_text)?;
+        let response_text_trim = response_text.trim_start_matches('\u{FEFF}');
+        let v: serde_json::Result<Value> = serde_json::from_str::<Value>(&response_text_trim);
+        let v = match v {
+            serde_json::Result::Ok(data) => data,
+            Err(e) => {
+                warn!("解析返回内容失败: {}, response: {}", e, response_text);
+                return Err(Error::msg("签到失败"));
+            }
+        };
 
         if let Some(status) = v.get("status") {
             if *status == json!("1") {
