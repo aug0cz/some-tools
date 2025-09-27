@@ -31,6 +31,9 @@ jobs:
           toolchain: stable
           override: true
           target: ${{ matrix.target}}
+      - name: Install musl-tools
+        if: matrix.build == 'linux'
+        run: sudo apt-get install -y musl-tools
 
       - name: build bugutv-checkin
         working-directory: ./bugutv-checkin
