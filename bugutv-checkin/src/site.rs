@@ -88,7 +88,7 @@ impl BrowserSite {
             .await?
             .text()
             .await?;
-        let re = Regex::new(r"(?ms)(积分钱包).*(当前余额：)(\d+?)")?;
+        let re = Regex::new(r"(?ms)(积分钱包).*(当前余额：)(\d+)")?;
         if let Some(cap) = re.captures(&resp) {
             if cap.len() == 4 {
                 let balance: u32 = cap[3].parse()?;
