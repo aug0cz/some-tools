@@ -62,7 +62,7 @@ impl BrowserSite {
             .await?;
         match resp.status() {
             StatusCode::OK => {
-                let re = Regex::new(r"(?ms)(积分钱包).*(当前余额：)(\d+?)")?;
+                let re = Regex::new(r"(?ms)(积分钱包).*(当前余额：)(\d+)")?;
                 let resp_text = resp.text().await?;
                 if let Some(cap) = re.captures(&resp_text) {
                     if cap.len() == 4 {
